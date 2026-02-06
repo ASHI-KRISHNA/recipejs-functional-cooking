@@ -238,6 +238,12 @@ const RecipeApp = (() => {
   let currentFilter = "all"; // all | easy | medium | hard | quick
   let currentSort = "none";  // none | name | time
 
+
+  // Part 4 State (Search + Favorites)
+  let searchQuery = "";
+  const STORAGE_KEY = "recipeFavorites";
+  const favoriteIds = new Set();
+  let debounceTimer = null;
   // Keep expanded state across re-renders
   // Map: recipeId -> { steps: boolean, ingredients: boolean }
   const expandedState = new Map();
@@ -249,6 +255,9 @@ const RecipeApp = (() => {
   let filterButtons;
   let sortButtons;
 
+  let searchInput;
+  let clearSearchBtn;
+  let recipeCounterEl;
   // ==============================
   // View Helpers
   // ==============================
@@ -305,6 +314,7 @@ const RecipeApp = (() => {
 
     return `
       <div class="recipe-card" data-id="${recipe.id}">
+        <button class="favorite-btn ${favoriteIds.has(recipe.id) ? "favorited" : ""}" data-action="favorite" data-recipe-id="${recipe.id}" aria-label="Toggle favorite" title="Favorite">♥</button>
         <div class="recipe-card-content">
           <h3>${recipe.title}</h3>
 
@@ -355,6 +365,13 @@ const RecipeApp = (() => {
     document.getElementById("easy-recipes").textContent = easyRecipes;
   };
 
+  const updateRecipeCounter = (shownCount) => {
+    const total = recipes.length;
+    if (recipeCounterEl) {
+      recipeCounterEl.textContent = `Showing ${shownCount} of ${total} recipes`;
+    }
+  };
+
   const renderRecipes = (recipesToRender) => {
     recipeContainer.innerHTML = recipesToRender.map(createRecipeCard).join("");
     updateStats(recipesToRender);
@@ -363,6 +380,35 @@ const RecipeApp = (() => {
 
   // ==============================
   // Pure Filter Functions
+
+  // ==============================
+  // Search (Part 4)
+  // ==============================
+  const normalizeQuery = (q) => (q || "").toLowerCase().trim();
+
+  const applySearch = (recipesList, query) => {
+    const q = normalizeQuery(query);
+    if (!q) return recipesList;
+
+    return recipesList.filter((recipe) => {
+      const titleMatch = (recipe.title || "").toLowerCase().includes(q);
+
+      const ingredientMatch = Array.isArray(recipe.ingredients)
+        ? recipe.ingredients.some((ing) => (ing || "").toLowerCase().includes(q))
+        : false;
+
+      const descriptionMatch = (recipe.description || "").toLowerCase().includes(q);
+
+      return titleMatch || ingredientMatch || descriptionMatch;
+    });
+  };
+
+  // ==============================
+  // Favorites (Part 4)
+  // ==============================
+  const applyFavoritesFilter = (recipesList) =>
+    recipesList.filter((recipe) => favoriteIds.has(recipe.id));
+
   // ==============================
   const filterByDifficulty = (recipesList, difficulty) =>
     recipesList.filter((recipe) => recipe.difficulty === difficulty);
@@ -378,6 +424,8 @@ const RecipeApp = (() => {
         return filterByDifficulty(recipesList, filterType);
       case "quick":
         return filterByTime(recipesList, 30);
+      case "favorites":
+        return applyFavoritesFilter(recipesList);
       case "all":
       default:
         return recipesList;
@@ -409,14 +457,17 @@ const RecipeApp = (() => {
   // Main Orchestrator (public)
   // ==============================
   const updateDisplay = () => {
-    let result = applyFilter(recipes, currentFilter);
+    // Order: Search -> Filter -> Sort
+    let result = applySearch(recipes, searchQuery);
+    result = applyFilter(result, currentFilter);
     result = applySort(result, currentSort);
 
     renderRecipes(result);
+    updateRecipeCounter(result.length);
     updateActiveButtons();
 
     console.log(
-      `Displaying ${result.length} recipes (Filter: ${currentFilter}, Sort: ${currentSort})`
+      `Displaying ${result.length} recipes (Search: "${normalizeQuery(searchQuery)}", Filter: ${currentFilter}, Sort: ${currentSort})`
     );
   };
 
@@ -434,8 +485,42 @@ const RecipeApp = (() => {
   };
 
   // ==============================
-  // Event Handlers
+  // Favorites Persistence (Part 4)
   // ==============================
+  const saveFavorites = () => {
+    try {
+      const arr = Array.from(favoriteIds);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+    } catch (err) {
+      console.warn("Could not save favorites:", err);
+    }
+  };
+
+  const loadFavorites = () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) {
+        arr.forEach((id) => favoriteIds.add(Number(id)));
+      }
+    } catch (err) {
+      console.warn("Could not load favorites:", err);
+    }
+  };
+
+  const toggleFavorite = (recipeId) => {
+    if (!recipeId) return;
+
+    if (favoriteIds.has(recipeId)) {
+      favoriteIds.delete(recipeId);
+    } else {
+      favoriteIds.add(recipeId);
+    }
+
+    saveFavorites();
+  };
+
+$1
   const handleFilterClick = (event) => {
     const filterType = event.target.dataset.filter;
     if (!filterType) return;
@@ -452,12 +537,47 @@ const RecipeApp = (() => {
     updateDisplay();
   };
 
-  const handleToggleClick = (event) => {
+  const handleSearchInput = (event) => {
+    const value = event.target.value || "";
+    if (clearSearchBtn) {
+      clearSearchBtn.style.display = value.trim() ? "inline-flex" : "none";
+    }
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      searchQuery = value;
+      updateDisplay();
+    }, 300);
+  };
+
+  const handleClearSearch = () => {
+    searchQuery = "";
+    if (searchInput) searchInput.value = "";
+    if (clearSearchBtn) clearSearchBtn.style.display = "none";
+    updateDisplay();
+  };
+
+  const handleCardClick = (event) => {
+    // Favorite button
+    const favBtn = event.target.closest(".favorite-btn");
+    if (favBtn) {
+      const recipeId = Number(favBtn.dataset.recipeId);
+      toggleFavorite(recipeId);
+
+      favBtn.classList.toggle("favorited", favoriteIds.has(recipeId));
+
+      if (currentFilter === "favorites" && !favoriteIds.has(recipeId)) {
+        updateDisplay();
+      }
+      return;
+    }
+
+    // Toggle buttons (steps/ingredients)
     const button = event.target.closest(".toggle-btn");
     if (!button) return;
 
     const recipeId = Number(button.dataset.recipeId);
-    const toggleType = button.dataset.toggle; // "steps" | "ingredients"
+    const toggleType = button.dataset.toggle;
     if (!recipeId || !toggleType) return;
 
     const card = button.closest(".recipe-card");
@@ -473,11 +593,9 @@ const RecipeApp = (() => {
     container.classList.toggle("visible");
     const isVisible = container.classList.contains("visible");
 
-    // Persist state across re-renders
     const prev = expandedState.get(recipeId) || { steps: false, ingredients: false };
     expandedState.set(recipeId, { ...prev, [toggleType]: isVisible });
 
-    // Update button label
     const label = toggleType === "steps" ? "Steps" : "Ingredients";
     button.textContent = `${isVisible ? "Hide" : "Show"} ${label}`;
   };
@@ -490,7 +608,11 @@ const RecipeApp = (() => {
     sortButtons.forEach((btn) => btn.addEventListener("click", handleSortClick));
 
     // Event delegation for toggle buttons
-    recipeContainer.addEventListener("click", handleToggleClick);
+    recipeContainer.addEventListener("click", handleCardClick);
+
+    // Search (debounced) + clear button
+    if (searchInput) searchInput.addEventListener("input", handleSearchInput);
+    if (clearSearchBtn) clearSearchBtn.addEventListener("click", handleClearSearch);
 
     console.log("Event listeners attached!");
   };
@@ -505,7 +627,16 @@ const RecipeApp = (() => {
     filterButtons = document.querySelectorAll("[data-filter]");
     sortButtons = document.querySelectorAll("[data-sort]");
 
+    searchInput = document.querySelector("#search-input");
+    clearSearchBtn = document.querySelector("#clear-search");
+    recipeCounterEl = document.querySelector("#recipe-counter");
+    if (!searchInput || !clearSearchBtn || !recipeCounterEl) {
+      console.warn("Search/counter UI not found. Make sure Part 4 HTML is updated.");
+    }
+
     setupEventListeners();
+
+    loadFavorites();
     updateDisplay();
 
     console.log("RecipeApp ready!");
