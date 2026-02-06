@@ -12,6 +12,12 @@
     <header>
         <h1>🍊 RecipeJS</h1>
         <p>Your Functional Cooking Companion</p>
+    
+        <div class="search-bar" role="search">
+            <input id="search-input" type="text" placeholder="Search recipes (title, ingredients)..." aria-label="Search recipes" />
+            <button id="clear-search" class="clear-btn" type="button" aria-label="Clear search" title="Clear">✕</button>
+        </div>
+
     </header>
     
     <!-- Main Content Area -->
@@ -41,6 +47,7 @@
                 <button class="control-btn" data-filter="medium">Medium</button>
                 <button class="control-btn" data-filter="hard">Hard</button>
                 <button class="control-btn" data-filter="quick">Quick (≤ 30 min)</button>
+                <button class="control-btn" data-filter="favorites">❤️ Favorites Only</button>
             </div>
 
             <div class="button-group">
@@ -49,6 +56,8 @@
                 <button class="control-btn" data-sort="time">Time (Fastest)</button>
             </div>
         </section>
+
+        <div class="recipe-counter" id="recipe-counter">Showing 8 of 8 recipes</div>
 
         <!-- Recipe Container -->
         <div id="recipe-container">
